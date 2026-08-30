@@ -2,7 +2,8 @@ name: Build Rolex AI APK
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
   workflow_dispatch:
 
 concurrency:
@@ -14,25 +15,38 @@ permissions:
 
 jobs:
   build:
+    name: Build Rolex AI APK
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
+      # ------------------------------------------------------------
+      # 1. Checkout
+      # ------------------------------------------------------------
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up Python
+      # ------------------------------------------------------------
+      # 2. Python 3.11
+      # ------------------------------------------------------------
+      - name: Set up Python 3.11
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
 
-      - name: Set up Java
+      # ------------------------------------------------------------
+      # 3. Java 17
+      # ------------------------------------------------------------
+      - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
+      # ------------------------------------------------------------
+      # 4. Android / Build dependencies
+      # ------------------------------------------------------------
       - name: Install Android build dependencies
         run: |
           sudo apt-get update
@@ -52,84 +66,172 @@ jobs:
             libffi-dev \
             libssl-dev
 
-      - name: Install Buildozer
+      # ------------------------------------------------------------
+      # 5. Verify environment
+      # ------------------------------------------------------------
+      - name: Verify build environment
+        shell: bash
         run: |
-          python -m pip install --upgrade pip setuptools wheel
+          set -e
+
+          echo "========================================"
+          echo "PYTHON"
+          echo "========================================"
+          python --version
+          python -c "import sys; print(sys.executable)"
+          python -c "import sys; print(sys.version)"
+
+          echo
+          echo "========================================"
+          echo "PIP"
+          echo "========================================"
+          python -m pip --version
+
+          echo
+          echo "========================================"
+          echo "JAVA"
+          echo "========================================"
+          java -version
+
+          echo
+          echo "========================================"
+          echo "ANDROID"
+          echo "========================================"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "ANDROID_NDK=$ANDROID_NDK"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+
+      # ------------------------------------------------------------
+      # 6. Install Buildozer
+      # ------------------------------------------------------------
+      - name: Install Buildozer
+        shell: bash
+        run: |
+          set -e
+
+          python -m pip install --upgrade \
+            pip \
+            setuptools \
+            wheel
 
           python -m pip install \
             "Cython==0.29.36" \
             "buildozer==1.5.0"
 
-      - name: Show environment
-        run: |
-          echo "=== Python ==="
-          python --version
-
-          echo "=== Pip ==="
-          python -m pip --version
-
-          echo "=== Buildozer ==="
+          echo
+          echo "Buildozer version:"
           buildozer --version
 
-          echo "=== Java ==="
-          java -version
-
-          echo "=== Android SDK ==="
-          echo "$ANDROID_HOME"
-
-          echo "=== Android NDK ==="
-          echo "$ANDROID_NDK"
-
+      # ------------------------------------------------------------
+      # 7. Validate project
+      # ------------------------------------------------------------
       - name: Validate Python sources
+        shell: bash
         run: |
-          python -m compileall -q main.py modules tests tools
+          set -e
+
+          python -m compileall -q \
+            main.py \
+            modules \
+            tests \
+            tools
+
           python tools/package_check.py
 
-      - name: Clean Buildozer state
+      # ------------------------------------------------------------
+      # 8. Check dependency files
+      # ------------------------------------------------------------
+      - name: Show Android dependency configuration
+        shell: bash
         run: |
+          echo "========================================"
+          echo "buildozer.spec"
+          echo "========================================"
+
+          sed -n '1,220p' buildozer.spec
+
+          echo
+          echo "========================================"
+          echo "requirements.txt"
+          echo "========================================"
+
+          if [ -f requirements.txt ]; then
+            cat requirements.txt
+          else
+            echo "requirements.txt not found"
+          fi
+
+      # ------------------------------------------------------------
+      # 9. Clean all Android build state
+      # ------------------------------------------------------------
+      - name: Clean Buildozer state
+        shell: bash
+        run: |
+          set -e
+
           rm -rf .buildozer
           rm -rf bin
 
-          echo "Clean build environment ready."
+          echo "Buildozer state cleaned."
 
+      # ------------------------------------------------------------
+      # 10. Build APK
+      # ------------------------------------------------------------
       - name: Build APK with Buildozer
         shell: bash
         run: |
           set -o pipefail
 
           echo "========================================"
-          echo "Starting Rolex AI APK build"
+          echo "STARTING ROLEX AI APK BUILD"
           echo "========================================"
 
           yes | buildozer -v android debug 2>&1 | tee build.log
 
           BUILD_EXIT=${PIPESTATUS[1]}
 
-          echo "Buildozer exit code: ${BUILD_EXIT}"
+          echo
+          echo "========================================"
+          echo "BUILDOZER EXIT CODE: ${BUILD_EXIT}"
+          echo "========================================"
 
           if [ "${BUILD_EXIT}" -ne 0 ]; then
-            echo ""
+            echo
             echo "========================================"
-            echo "BUILD FAILED - IMPORTANT ERRORS"
+            echo "BUILD FAILED"
             echo "========================================"
 
-            echo ""
-            echo "First compiler errors:"
-            grep -n -m 10 -E "error:|fatal error:" build.log || true
+            echo
+            echo "FIRST IMPORTANT ERRORS:"
+            grep -n -m 20 \
+              -E "error:|fatal error:|ERROR:" \
+              build.log || true
 
-            echo ""
-            echo "Last build errors:"
-            grep -n -E "error:|fatal error:|Error:" build.log | tail -n 20 || true
+            echo
+            echo "LAST IMPORTANT ERRORS:"
+            grep -n \
+              -E "error:|fatal error:|ERROR:" \
+              build.log | tail -n 30 || true
 
-            echo ""
-            echo "Last 80 lines:"
-            tail -n 80 build.log
+            echo
+            echo "LAST 100 BUILD LOG LINES:"
+            tail -n 100 build.log || true
 
             exit "${BUILD_EXIT}"
           fi
 
+          echo
+          echo "========================================"
+          echo "BUILDOZER BUILD COMPLETED"
+          echo "========================================"
+
+      # ------------------------------------------------------------
+      # 11. Inspect APK output
+      # ------------------------------------------------------------
       - name: Inspect build output
         if: always()
+        shell: bash
         run: |
           echo "========================================"
           echo "BUILD OUTPUT"
@@ -142,37 +244,54 @@ jobs:
           fi
 
           echo
-          echo "Searching for APK files..."
+          echo "APK SEARCH:"
+          find . \
+            -type f \
+            -name "*.apk" \
+            -print || true
 
-          find . -type f -name "*.apk" -print || true
-
+      # ------------------------------------------------------------
+      # 12. Verify APK
+      # ------------------------------------------------------------
       - name: Verify APK artifact
         shell: bash
         run: |
           set -e
 
-          apk="$(find bin -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          apk="$(find bin \
+            -maxdepth 1 \
+            -type f \
+            -name '*.apk' \
+            -print \
+            -quit)"
 
           if [ -z "$apk" ]; then
-            echo "ERROR: No APK was generated."
+            echo "========================================"
+            echo "ERROR: NO APK GENERATED"
+            echo "========================================"
+
             echo
-            echo "Last 100 lines of build.log:"
-            tail -n 100 build.log || true
+            echo "Last 150 lines of build.log:"
+            tail -n 150 build.log || true
+
             exit 1
           fi
 
           echo "========================================"
-          echo "APK BUILD SUCCESSFUL"
+          echo "APK GENERATED SUCCESSFULLY"
           echo "========================================"
 
-          echo "APK:"
+          echo "APK path:"
           echo "$apk"
 
           echo
-          echo "APK size:"
+          echo "APK information:"
           ls -lh "$apk"
 
-      - name: Upload APK
+      # ------------------------------------------------------------
+      # 13. Upload APK
+      # ------------------------------------------------------------
+      - name: Upload APK artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
@@ -180,6 +299,9 @@ jobs:
           path: bin/*.apk
           if-no-files-found: error
 
+      # ------------------------------------------------------------
+      # 14. Always upload build log
+      # ------------------------------------------------------------
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
