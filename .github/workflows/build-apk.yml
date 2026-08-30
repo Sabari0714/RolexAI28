@@ -27,18 +27,37 @@ jobs:
           python-version: "3.11"
           cache: pip
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
       - name: Install Android build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            git zip unzip openjdk-17-jdk autoconf automake libtool \
-            pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
-            libtinfo5 cmake libffi-dev libssl-dev
+            git zip unzip \
+            autoconf automake libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            cmake \
+            libffi-dev \
+            libssl-dev
 
-      - name: Install Buildozer toolchain
+      - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip setuptools wheel
           python -m pip install "Cython==0.29.36" "buildozer==1.5.0"
+
+      - name: Show project files
+        run: |
+          echo "=== Project root ==="
+          pwd
+          echo "=== Files ==="
+          find . -maxdepth 2 -type f | sort
 
       - name: Validate Python sources
         run: |
@@ -46,27 +65,67 @@ jobs:
           python tools/package_check.py
 
       - name: Build APK with Buildozer
-        env:
-          P4A_RELEASE: "0"
+        shell: bash
         run: |
-          yes | buildozer android debug 2>&1 | tee build.log
+          set -o pipefail
+
+          echo "=== Starting Buildozer ==="
+
+          yes | buildozer -v android debug 2>&1 | tee build.log
+
+          BUILD_EXIT=${PIPESTATUS[1]}
+
+          echo "Buildozer exit code: ${BUILD_EXIT}"
+
+          if [ "${BUILD_EXIT}" -ne 0 ]; then
+            echo "Buildozer failed."
+            exit "${BUILD_EXIT}"
+          fi
+
+      - name: Inspect build output
+        if: always()
+        run: |
+          echo "=== bin directory ==="
+
+          if [ -d bin ]; then
+            ls -lah bin
+            find bin -maxdepth 1 -type f -print
+          else
+            echo "bin directory does not exist."
+          fi
+
+          echo "=== APK search ==="
+          find . -type f -name "*.apk" -print || true
 
       - name: Verify APK artifact
+        shell: bash
         run: |
+          set -e
+
           apk="$(find bin -maxdepth 1 -type f -name '*.apk' -print -quit)"
-          test -n "$apk"
-          echo "APK=$apk"
+
+          if [ -z "$apk" ]; then
+            echo "ERROR: No APK was generated."
+            echo
+            echo "=== Last 100 lines of build.log ==="
+            tail -n 100 build.log || true
+            exit 1
+          fi
+
+          echo "APK generated successfully:"
+          echo "$apk"
           ls -lh "$apk"
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: RolexAI-debug-arm64
           path: bin/*.apk
           if-no-files-found: error
 
-      - name: Upload build log on failure
-        if: failure()
+      - name: Upload build log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: RolexAI-build-log
