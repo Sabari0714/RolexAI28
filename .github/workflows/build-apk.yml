@@ -98,19 +98,33 @@ jobs:
           set -o pipefail
 
           echo "========================================"
-          echo "Starting Rolex AI Android build"
+          echo "Starting Rolex AI APK build"
           echo "========================================"
 
           yes | buildozer -v android debug 2>&1 | tee build.log
 
           BUILD_EXIT=${PIPESTATUS[1]}
 
-          echo "========================================"
           echo "Buildozer exit code: ${BUILD_EXIT}"
-          echo "========================================"
 
           if [ "${BUILD_EXIT}" -ne 0 ]; then
-            echo "Buildozer build FAILED."
+            echo ""
+            echo "========================================"
+            echo "BUILD FAILED - IMPORTANT ERRORS"
+            echo "========================================"
+
+            echo ""
+            echo "First compiler errors:"
+            grep -n -m 10 -E "error:|fatal error:" build.log || true
+
+            echo ""
+            echo "Last build errors:"
+            grep -n -E "error:|fatal error:|Error:" build.log | tail -n 20 || true
+
+            echo ""
+            echo "Last 80 lines:"
+            tail -n 80 build.log
+
             exit "${BUILD_EXIT}"
           fi
 
