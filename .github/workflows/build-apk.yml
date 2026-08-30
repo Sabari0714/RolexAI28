@@ -138,12 +138,25 @@ jobs:
             tools
 
           python tools/package_check.py
+      - name: Inspect python-for-android configuration
+        shell: bash
+        run: |
+          python -m pip show buildozer || true
+          python -m pip show python-for-android || true
 
+<<<<<<< Updated upstream
       # ------------------------------------------------------------
       # 8. Check dependency files
       # ------------------------------------------------------------
       - name: Show Android dependency configuration
         shell: bash
+=======
+          echo "Installed p4a:"
+          python -m pip list | grep -Ei "buildozer|python-for-android|kivy|cython|charset" || true
+      - name: Build APK with Buildozer
+        env:
+          P4A_RELEASE: "0"
+>>>>>>> Stashed changes
         run: |
           echo "========================================"
           echo "buildozer.spec"
