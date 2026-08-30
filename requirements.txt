@@ -1,0 +1,9 @@
+# Android runtime dependencies are intentionally minimal.
+# This prevents optional document-parser packages from breaking the APK build.
+kivy==2.3.1
+
+# Optional desktop/Pydroid document readers. The app detects these at runtime.
+# pypdf>=5.0.0
+# python-docx>=1.1.0
+# openpyxl>=3.1.0
+# python-pptx>=1.0.0

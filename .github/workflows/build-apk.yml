@@ -1,0 +1,74 @@
+name: Build Rolex AI APK
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: rolex-android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Android build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git zip unzip openjdk-17-jdk autoconf automake libtool \
+            pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev \
+            libtinfo5 cmake libffi-dev libssl-dev
+
+      - name: Install Buildozer toolchain
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install "Cython==0.29.36" "buildozer==1.5.0"
+
+      - name: Validate Python sources
+        run: |
+          python -m compileall -q main.py modules tests tools
+          python tools/package_check.py
+
+      - name: Build APK with Buildozer
+        env:
+          P4A_RELEASE: "0"
+        run: |
+          yes | buildozer android debug 2>&1 | tee build.log
+
+      - name: Verify APK artifact
+        run: |
+          apk="$(find bin -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$apk"
+          echo "APK=$apk"
+          ls -lh "$apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RolexAI-debug-arm64
+          path: bin/*.apk
+          if-no-files-found: error
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RolexAI-build-log
+          path: build.log
+          if-no-files-found: ignore
