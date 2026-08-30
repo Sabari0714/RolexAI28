@@ -1,38 +1,34 @@
-- name: Clean Buildozer state
-  run: |
-          rm -rf .buildozer
-          rm -rf bin
-- name: Build Rolex AI APK
+name: Build Rolex AI APK
 
-  on:
+on:
   push:
     branches: ["main"]
   workflow_dispatch:
-  
- concurrency:
+
+concurrency:
   group: rolex-android-${{ github.ref }}
   cancel-in-progress: true
 
- permissions:
+permissions:
   contents: read
 
- jobs:
+jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
 
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -40,9 +36,14 @@
       - name: Install Android build dependencies
         run: |
           sudo apt-get update
+
           sudo apt-get install -y \
-            git zip unzip \
-            autoconf automake libtool \
+            git \
+            zip \
+            unzip \
+            autoconf \
+            automake \
+            libtool \
             pkg-config \
             zlib1g-dev \
             libncurses5-dev \
@@ -54,51 +55,81 @@
       - name: Install Buildozer
         run: |
           python -m pip install --upgrade pip setuptools wheel
-          python -m pip install "Cython==0.29.36" "buildozer==1.5.0"
 
-      - name: Show project files
+          python -m pip install \
+            "Cython==0.29.36" \
+            "buildozer==1.5.0"
+
+      - name: Show environment
         run: |
-          echo "=== Project root ==="
-          pwd
-          echo "=== Files ==="
-          find . -maxdepth 2 -type f | sort
+          echo "=== Python ==="
+          python --version
+
+          echo "=== Pip ==="
+          python -m pip --version
+
+          echo "=== Buildozer ==="
+          buildozer --version
+
+          echo "=== Java ==="
+          java -version
+
+          echo "=== Android SDK ==="
+          echo "$ANDROID_HOME"
+
+          echo "=== Android NDK ==="
+          echo "$ANDROID_NDK"
 
       - name: Validate Python sources
         run: |
           python -m compileall -q main.py modules tests tools
           python tools/package_check.py
 
+      - name: Clean Buildozer state
+        run: |
+          rm -rf .buildozer
+          rm -rf bin
+
+          echo "Clean build environment ready."
+
       - name: Build APK with Buildozer
         shell: bash
         run: |
           set -o pipefail
 
-          echo "=== Starting Buildozer ==="
+          echo "========================================"
+          echo "Starting Rolex AI Android build"
+          echo "========================================"
 
           yes | buildozer -v android debug 2>&1 | tee build.log
 
           BUILD_EXIT=${PIPESTATUS[1]}
 
+          echo "========================================"
           echo "Buildozer exit code: ${BUILD_EXIT}"
+          echo "========================================"
 
           if [ "${BUILD_EXIT}" -ne 0 ]; then
-            echo "Buildozer failed."
+            echo "Buildozer build FAILED."
             exit "${BUILD_EXIT}"
           fi
 
       - name: Inspect build output
         if: always()
         run: |
-          echo "=== bin directory ==="
+          echo "========================================"
+          echo "BUILD OUTPUT"
+          echo "========================================"
 
           if [ -d bin ]; then
             ls -lah bin
-            find bin -maxdepth 1 -type f -print
           else
             echo "bin directory does not exist."
           fi
 
-          echo "=== APK search ==="
+          echo
+          echo "Searching for APK files..."
+
           find . -type f -name "*.apk" -print || true
 
       - name: Verify APK artifact
@@ -111,13 +142,20 @@
           if [ -z "$apk" ]; then
             echo "ERROR: No APK was generated."
             echo
-            echo "=== Last 100 lines of build.log ==="
+            echo "Last 100 lines of build.log:"
             tail -n 100 build.log || true
             exit 1
           fi
 
-          echo "APK generated successfully:"
+          echo "========================================"
+          echo "APK BUILD SUCCESSFUL"
+          echo "========================================"
+
+          echo "APK:"
           echo "$apk"
+
+          echo
+          echo "APK size:"
           ls -lh "$apk"
 
       - name: Upload APK
