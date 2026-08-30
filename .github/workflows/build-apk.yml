@@ -1,18 +1,22 @@
-name: Build Rolex AI APK
+- name: Clean Buildozer state
+  run: |
+          rm -rf .buildozer
+          rm -rf bin
+- name: Build Rolex AI APK
 
-on:
+  on:
   push:
     branches: ["main"]
   workflow_dispatch:
-
-concurrency:
+  
+ concurrency:
   group: rolex-android-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
+ permissions:
   contents: read
 
-jobs:
+ jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 60
