@@ -1,0 +1,289 @@
+name: Build Rolex AI APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: rolex-android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Rolex AI APK
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            git \
+            zip \
+            unzip \
+            autoconf \
+            automake \
+            libtool \
+            pkg-config \
+            zlib1g-dev \
+            libncurses5-dev \
+            libncursesw5-dev \
+            cmake \
+            libffi-dev \
+            libssl-dev
+
+      - name: Verify environment
+        shell: bash
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "PYTHON"
+          echo "========================================"
+
+          python --version
+          python -c "import sys; print(sys.executable)"
+          python -c "import sys; print(sys.version)"
+
+          echo
+          echo "========================================"
+          echo "PIP"
+          echo "========================================"
+
+          python -m pip --version
+
+          echo
+          echo "========================================"
+          echo "JAVA"
+          echo "========================================"
+
+          java -version
+
+          echo
+          echo "========================================"
+          echo "ANDROID"
+          echo "========================================"
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "ANDROID_NDK=$ANDROID_NDK"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+
+      - name: Install Buildozer
+        shell: bash
+        run: |
+          set -e
+
+          python -m pip install --upgrade \
+            pip \
+            setuptools \
+            wheel
+
+          python -m pip install \
+            "Cython==0.29.36" \
+            "buildozer==1.5.0"
+
+          echo
+          echo "Buildozer version:"
+          buildozer --version
+
+      - name: Validate Python sources
+        shell: bash
+        run: |
+          set -e
+
+          python -m compileall -q \
+            main.py \
+            modules \
+            tests \
+            tools
+
+          python tools/package_check.py
+
+      - name: Inspect python-for-android configuration
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "BUILD DEPENDENCIES"
+          echo "========================================"
+
+          python -m pip show buildozer || true
+          python -m pip show python-for-android || true
+
+          echo
+          echo "Installed packages:"
+          python -m pip list | grep -Ei \
+            "buildozer|python-for-android|kivy|cython|charset" || true
+
+      - name: Show dependency configuration
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "buildozer.spec"
+          echo "========================================"
+
+          sed -n '1,220p' buildozer.spec
+
+          echo
+          echo "========================================"
+          echo "requirements.txt"
+          echo "========================================"
+
+          if [ -f requirements.txt ]; then
+            cat requirements.txt
+          else
+            echo "requirements.txt not found"
+          fi
+
+      - name: Clean Buildozer state
+        shell: bash
+        run: |
+          set -e
+
+          rm -rf .buildozer
+          rm -rf bin
+
+          echo "Buildozer state cleaned."
+
+      - name: Build APK with Buildozer
+        shell: bash
+        run: |
+          set -o pipefail
+
+          echo "========================================"
+          echo "STARTING ROLEX AI APK BUILD"
+          echo "========================================"
+
+          yes | buildozer -v android debug 2>&1 | tee build.log
+
+          BUILD_EXIT=${PIPESTATUS[1]}
+
+          echo
+          echo "========================================"
+          echo "BUILDOZER EXIT CODE: ${BUILD_EXIT}"
+          echo "========================================"
+
+          if [ "${BUILD_EXIT}" -ne 0 ]; then
+            echo
+            echo "========================================"
+            echo "BUILD FAILED"
+            echo "========================================"
+
+            echo
+            echo "FIRST IMPORTANT ERRORS:"
+            grep -n -m 20 \
+              -E "error:|fatal error:|ERROR:" \
+              build.log || true
+
+            echo
+            echo "LAST IMPORTANT ERRORS:"
+            grep -n \
+              -E "error:|fatal error:|ERROR:" \
+              build.log | tail -n 30 || true
+
+            echo
+            echo "LAST 100 BUILD LOG LINES:"
+            tail -n 100 build.log || true
+
+            exit "${BUILD_EXIT}"
+          fi
+
+          echo
+          echo "========================================"
+          echo "BUILDOZER BUILD COMPLETED"
+          echo "========================================"
+
+      - name: Inspect build output
+        if: always()
+        shell: bash
+        run: |
+          echo "========================================"
+          echo "BUILD OUTPUT"
+          echo "========================================"
+
+          if [ -d bin ]; then
+            ls -lah bin
+          else
+            echo "bin directory does not exist."
+          fi
+
+          echo
+          echo "APK SEARCH:"
+
+          find . \
+            -type f \
+            -name "*.apk" \
+            -print || true
+
+      - name: Verify APK artifact
+        shell: bash
+        run: |
+          set -e
+
+          apk="$(find bin \
+            -maxdepth 1 \
+            -type f \
+            -name '*.apk' \
+            -print \
+            -quit)"
+
+          if [ -z "$apk" ]; then
+            echo "========================================"
+            echo "ERROR: NO APK GENERATED"
+            echo "========================================"
+
+            echo
+            echo "Last 150 lines of build.log:"
+
+            tail -n 150 build.log || true
+
+            exit 1
+          fi
+
+          echo "========================================"
+          echo "APK GENERATED SUCCESSFULLY"
+          echo "========================================"
+
+          echo "APK path:"
+          echo "$apk"
+
+          echo
+          echo "APK information:"
+          ls -lh "$apk"
+
+      - name: Upload APK artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RolexAI-debug-arm64
+          path: bin/*.apk
+          if-no-files-found: error
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RolexAI-build-log
+          path: build.log
+          if-no-files-found: ignore
