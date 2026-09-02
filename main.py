@@ -31,17 +31,44 @@ import csv
 import shutil
 import random
 
-from kivy.app import App
-from kivy.core.window import Window
-from kivy.clock import Clock
-from kivy.metrics import dp
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
-from kivy.uix.label import Label
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.textinput import TextInput
-from kivy.graphics import Color, RoundedRectangle
-from kivy.utils import get_color_from_hex as _hex
+# Kivy is required only by the Android GUI layer.
+# Backend/Brain tests must remain usable without Kivy.
+try:
+    from kivy.app import App
+    from kivy.core.window import Window
+    from kivy.clock import Clock
+    from kivy.metrics import dp
+    from kivy.uix.boxlayout import BoxLayout
+    from kivy.uix.button import Button
+    from kivy.uix.label import Label
+    from kivy.uix.scrollview import ScrollView
+    from kivy.uix.textinput import TextInput
+    from kivy.graphics import Color, RoundedRectangle
+    from kivy.utils import get_color_from_hex as _hex
+    KIVY_AVAILABLE = True
+except ImportError:
+    KIVY_AVAILABLE = False
+
+    class _KivyUnavailable:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError(
+                "Kivy is required only for the Rolex Android GUI."
+            )
+
+    App = _KivyUnavailable
+    Window = _KivyUnavailable
+    Clock = _KivyUnavailable
+    dp = lambda value: value
+    BoxLayout = _KivyUnavailable
+    Button = _KivyUnavailable
+    Label = _KivyUnavailable
+    ScrollView = _KivyUnavailable
+    TextInput = _KivyUnavailable
+    Color = _KivyUnavailable
+    RoundedRectangle = _KivyUnavailable
+
+    def _hex(value):
+        return value
 
 
 # ------------------------------------------------------------
@@ -117,6 +144,15 @@ def load_env():
     return data
 
 
+from modules.parallel_ai import parallel_rolex_answer
+
+from modules.providers import (
+    ProviderError,
+    openai_answer,
+    gemini_answer,
+    ollama_answer,
+)
+
 ENV = load_env()
 
 
@@ -137,10 +173,10 @@ GEMINI_MODEL = cfg("GEMINI_MODEL", "gemini-3.6-flash")
 OLLAMA_MODEL = cfg("OLLAMA_MODEL")
 SERPER_KEY = cfg("SERPER_API_KEY")
 
-ORDER = ["role-local"]
+ORDER = ["role-local", "openai", "gemini", "ollama"]
 
 # Rolex-only policy: hosted LLM providers are intentionally disabled.
-EXTERNAL_AI_DISABLED = True
+EXTERNAL_AI_DISABLED = False
 
 
 # ------------------------------------------------------------
@@ -1037,13 +1073,278 @@ class Brain:
         return ("Rolex local knowledge-la indha request-ku direct answer available illa. "
                 "Guess panna maatten. Document/data kudutha, available local tools use panni help panren.")
 
-    def ask(self,prompt):
-        key=hashlib.sha256(('role-local-v4\n'+prompt.lower()).encode('utf-8')).hexdigest()
-        cached=self.db.cache_get(key)
-        if cached: return cached,'role-local-cache'
-        answer=self._answer(prompt)
-        self.db.cache_set(key,answer)
-        return answer,'role-local'
+    def _provider_order(self):
+        raw = cfg("PROVIDER_ORDER", "openai,gemini,ollama,offline")
+        order = []
+
+        for name in raw.split(","):
+            name = name.strip().lower()
+
+            if name in ("openai", "gemini", "ollama", "offline"):
+                if name not in order:
+                    order.append(name)
+
+        if "offline" not in order:
+            order.append("offline")
+
+        return order
+
+    def _external_context(self, prompt):
+        memory = memory_context(self.db)
+
+        return (
+            system_prompt()
+            + "\n\nRelevant saved memory:\n"
+            + memory
+            + "\n\nImportant Rolex rule:\n"
+            + "You are an intelligence source for Rolex. "
+            + "Your response is not sent directly to the user. "
+            + "Rolex owns the final response layer. "
+            + "Do not claim actions were completed unless the information confirms they happened."
+            + "\n\nUser request:\n"
+            + prompt
+        )
+
+    def _ask_provider(self, provider, prompt):
+        context = self._external_context(prompt)
+
+        if provider == "openai":
+            if not OPENAI_KEY:
+                raise ProviderError("OpenAI API key is not configured.")
+
+            return openai_answer(
+                OPENAI_KEY,
+                OPENAI_MODEL,
+                system_prompt(),
+                context,
+                timeout=15,
+            )
+
+        if provider == "gemini":
+            if not GEMINI_KEY:
+                raise ProviderError("Gemini API key is not configured.")
+
+            return gemini_answer(
+                GEMINI_KEY,
+                GEMINI_MODEL,
+                system_prompt(),
+                context,
+                timeout=15,
+            )
+
+        if provider == "ollama":
+            return ollama_answer(
+                cfg("OLLAMA_URL", "http://127.0.0.1:11434"),
+                OLLAMA_MODEL,
+                system_prompt(),
+                context,
+                timeout=8,
+            )
+
+        return None
+
+    def _consult_providers(self, prompt):
+        """
+        Consult configured external intelligence providers in parallel.
+
+        Each provider runs independently so a slow provider does not
+        unnecessarily block the others. Rolex receives all successful
+        responses and owns the synthesis/final-answer layer.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        providers = [
+            provider
+            for provider in self._provider_order()
+            if provider != "offline"
+        ]
+
+        if not providers:
+            return []
+
+        responses = []
+
+        def consult(provider):
+            try:
+                result = self._ask_provider(provider, prompt)
+
+                if result:
+                    return {
+                        "provider": provider,
+                        "text": str(result).strip(),
+                    }
+
+            except ProviderError:
+                return None
+
+            except Exception:
+                return None
+
+            return None
+
+        # Run all available providers concurrently.
+        max_workers = min(len(providers), 3)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(consult, provider): provider
+                for provider in providers
+            }
+
+            for future in as_completed(futures):
+                result = future.result()
+
+                if result:
+                    responses.append(result)
+
+        # Keep provider order deterministic for Rolex synthesis.
+        provider_position = {
+            provider: index
+            for index, provider in enumerate(providers)
+        }
+
+        responses.sort(
+            key=lambda item: provider_position.get(
+                item["provider"],
+                999,
+            )
+        )
+
+        return responses
+
+    def _rolex_synthesize(self, prompt, responses):
+        """
+        Rolex owns the final response layer.
+
+        External providers are treated as independent opinions.
+        Their raw responses are not sent directly to the user.
+        """
+        if not responses:
+            return None
+
+        sections = []
+
+        for item in responses:
+            sections.append(
+                "[{} analysis]\n{}".format(
+                    item["provider"].upper(),
+                    item["text"],
+                )
+            )
+
+        combined = "\n\n".join(sections)
+
+        return (
+            "Rolex analysis based on the available intelligence sources:"
+            "\n\n"
+            + combined
+            + "\n\n"
+            "Rolex final note: The above sources were consulted by Rolex. "
+            "Where their information differs, it should be verified against "
+            "reliable source data before taking action."
+        )
+
+    def _rolex_finalize(self, provider_text, prompt, provider):
+        if not provider_text:
+            return None
+
+        text = str(provider_text).strip()
+
+        if not text:
+            return None
+
+        prefix = "Based on the information available to Rolex:"
+
+        return prefix + "\n\n" + text
+
+    def ask(self, prompt):
+        prompt = prompt.strip()
+
+        if not prompt:
+            return "", "role-local"
+
+        key = hashlib.sha256(
+            ("role-router-v2\\n" + prompt.lower()).encode("utf-8")
+        ).hexdigest()
+
+        cached = self.db.cache_get(key)
+
+        if cached:
+            return cached, "role-cache"
+
+        # Rolex handles simple/common requests locally first.
+        local = self._answer(prompt)
+
+        unknown_prefix = (
+            "Rolex local knowledge-la indha request-ku direct answer available illa."
+        )
+
+        if local and not local.startswith(unknown_prefix):
+            self.db.cache_set(key, local)
+            return local, "role-local"
+
+        # Parallel intelligence layer.
+        # Rolex consults available external intelligence sources concurrently.
+        # The parallel engine handles provider execution, scoring and synthesis.
+        if not EXTERNAL_AI_DISABLED:
+            config = {
+                "providers": [
+                    provider
+                    for provider in self._provider_order()
+                    if provider != "offline"
+                ],
+                "openai_key": OPENAI_KEY,
+                "openai_model": OPENAI_MODEL,
+                "gemini_key": GEMINI_KEY,
+                "gemini_model": GEMINI_MODEL,
+                "ollama_url": cfg(
+                    "OLLAMA_URL",
+                    "http://127.0.0.1:11434",
+                ),
+                "ollama_model": OLLAMA_MODEL,
+                "system_prompt": system_prompt(),
+                "openai_timeout": 15,
+                "gemini_timeout": 15,
+                "ollama_timeout": 60,
+            }
+
+            try:
+                result = parallel_rolex_answer(
+                    prompt,
+                    config,
+                )
+
+                final = result.get("final_answer")
+
+                if final:
+                    self.db.cache_set(key, final)
+
+                    successful = [
+                        item
+                        for item in result.get("candidates", [])
+                        if item.get("success")
+                    ]
+
+                    providers = ",".join(
+                        item["provider"]
+                        for item in successful
+                    )
+
+                    return final, (
+                        "role-parallel/"
+                        + (providers or "none")
+                    )
+
+            except Exception:
+                pass
+
+        # Complete offline fallback.
+        fallback = offline(prompt)
+
+        self.db.cache_set(key, fallback)
+
+        return fallback, "role-offline"
+
 
 # ============================================================
 # ROLEX CORE
