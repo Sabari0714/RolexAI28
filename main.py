@@ -145,6 +145,7 @@ def load_env():
 
 
 from modules.parallel_ai import parallel_rolex_answer
+from modules.math_engine import calculate as local_math_calculate
 
 from modules.providers import (
     ProviderError,
@@ -1034,23 +1035,11 @@ class Brain:
         return random.choice(options) + "\n\n" + text
 
     def _math(self, prompt):
-        if not re.fullmatch(r'[0-9+\-*/(). %]+', prompt.strip()):
-            return None
+        """Rolex-owned deterministic offline mathematics engine."""
         try:
-            expr = prompt.strip().replace('%','/100')
-            if not re.fullmatch(r'[0-9+\-*/(). ]+', expr): return None
-            import ast, operator
-            tree=ast.parse(expr,mode='eval')
-            ops={ast.Add:operator.add,ast.Sub:operator.sub,ast.Mult:operator.mul,ast.Div:operator.truediv,ast.USub:operator.neg}
-            def ev(n):
-                if isinstance(n,ast.Expression): return ev(n.body)
-                if isinstance(n,ast.Constant) and isinstance(n.value,(int,float)): return n.value
-                if isinstance(n,ast.UnaryOp) and type(n.op) in ops: return ops[type(n.op)](ev(n.operand))
-                if isinstance(n,ast.BinOp) and type(n.op) in ops: return ops[type(n.op)](ev(n.left),ev(n.right))
-                raise ValueError()
-            value=ev(tree)
-            return f"{int(value) if float(value).is_integer() else value:g}"
+            return local_math_calculate(prompt)
         except Exception:
+            # Math failures must never crash the main assistant.
             return None
 
     def _answer(self,prompt):

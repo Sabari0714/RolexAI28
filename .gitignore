@@ -5,3 +5,6 @@ __pycache__/
 .env
 .buildozer/
 bin/
+
+# Rolex AI local backup files
+*.before-*
