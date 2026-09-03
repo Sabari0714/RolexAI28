@@ -10,7 +10,7 @@ source.exclude_exts = pyc,pyo
 
 version = 3.0.2
 
-requirements = python3,kivy==2.3.1
+requirements = python3,kivy==2.3.1,charset-normalizer==2.1.1
 
 orientation = portrait
 fullscreen = 0
