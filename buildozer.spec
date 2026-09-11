@@ -1,29 +1,25 @@
 [app]
-title = Rolex AI
+title = ROLEX AI
 package.name = rolexai
 package.domain = org.rolexai
-
 source.dir = .
-source.include_exts = py,png,jpg,jpeg,kv,json,txt,mp3,wav,ogg
-source.exclude_dirs = .git,.github,__pycache__,.buildozer,tests,tools
-source.exclude_exts = pyc,pyo
-
-version = 3.0.2
-
-requirements = python3,kivy==2.3.1,charset-normalizer==2.1.1
-
+source.include_exts = py,json,txt,md,png,jpg,jpeg,kv,atlas,b64
+source.exclude_exts = pyc,pyo,db,log
+version = 38.0.0
+requirements = python3,kivy==2.3.1
 orientation = portrait
 fullscreen = 0
-
-android.api = 34
-android.minapi = 24
-android.archs = arm64-v8a
-
-android.ndk = 25b
-
-android.permissions = INTERNET,RECORD_AUDIO
-android.accept_sdk_license = True
+services = rolex_service:rolex_service.py
 
 [buildozer]
 log_level = 2
 warn_on_root = 1
+
+[app:android]
+android.api = 34
+android.minapi = 23
+android.ndk = 25b
+android.archs = arm64-v8a
+android.permissions = INTERNET,RECORD_AUDIO,POST_NOTIFICATIONS,SEND_SMS,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,FOREGROUND_SERVICE
+android.allow_backup = False
+android.uses_cleartext_traffic = False
