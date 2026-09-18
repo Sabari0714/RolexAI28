@@ -3,14 +3,12 @@ title = ROLEX AI
 package.name = rolexai
 package.domain = org.rolexai
 source.dir = .
-source.include_exts = py,json,txt,md,png,jpg,jpeg,kv,atlas,b64
+source.include_exts = py,json,txt,md,png,jpg,jpeg,kv,atlas
 source.exclude_exts = pyc,pyo,db,log
 version = 38.0.0
 requirements = python3,kivy==2.3.1
 orientation = portrait
 fullscreen = 0
-services = rolex_service:rolex_service.py
-
 [buildozer]
 log_level = 2
 warn_on_root = 1
