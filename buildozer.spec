@@ -1,11 +1,11 @@
 [app]
-title = ROLEX AI
+title = Rolex V 2.0
 package.name = rolexai
 package.domain = org.rolexai
 source.dir = .
 source.include_exts = py,json,txt,md,png,jpg,jpeg,kv,atlas
 source.exclude_exts = pyc,pyo,db,log
-version = 38.0.0
+version = 2.0.0
 requirements = python3,kivy==2.3.1
 orientation = portrait
 fullscreen = 0
