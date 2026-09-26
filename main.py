@@ -152,6 +152,7 @@ from modules.providers import (
     openai_answer,
     gemini_answer,
     ollama_answer,
+    local_llama_answer_provider,
 )
 
 ENV = load_env()
@@ -1063,13 +1064,13 @@ class Brain:
                 "Guess panna maatten. Document/data kudutha, available local tools use panni help panren.")
 
     def _provider_order(self):
-        raw = cfg("PROVIDER_ORDER", "openai,gemini,ollama,offline")
+        raw = cfg("PROVIDER_ORDER", "local-llama,offline")
         order = []
 
         for name in raw.split(","):
             name = name.strip().lower()
 
-            if name in ("openai", "gemini", "ollama", "offline"):
+            if name in ("local-llama", "openai", "gemini", "ollama", "offline"):
                 if name not in order:
                     order.append(name)
 
@@ -1096,6 +1097,14 @@ class Brain:
 
     def _ask_provider(self, provider, prompt):
         context = self._external_context(prompt)
+
+        if provider == "local-llama":
+            return local_llama_answer_provider(
+                system_prompt(),
+                context,
+                timeout=int(cfg("ROLEX_LLAMA_TIMEOUT", "180")),
+                max_tokens=int(cfg("ROLEX_LLAMA_MAX_TOKENS", "256")),
+            )
 
         if provider == "openai":
             if not OPENAI_KEY:
@@ -1295,6 +1304,8 @@ class Brain:
                 "openai_timeout": 15,
                 "gemini_timeout": 15,
                 "ollama_timeout": 60,
+                "local_llama_timeout": int(cfg("ROLEX_LLAMA_TIMEOUT", "180")),
+                "local_llama_max_tokens": int(cfg("ROLEX_LLAMA_MAX_TOKENS", "256")),
             }
 
             try:
