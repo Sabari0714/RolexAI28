@@ -8,6 +8,8 @@ import json
 import urllib.request
 import urllib.error
 
+from modules.local_llama import local_llama_answer
+
 
 class ProviderError(RuntimeError):
     pass
@@ -196,3 +198,13 @@ def ollama_answer(base_url, model, system_text, user_text, timeout=30):
         raise ProviderError("Ollama returned no text.")
 
     return text
+
+
+def local_llama_answer_provider(system_text, user_text, timeout=180, max_tokens=256):
+    """Rolex local intelligence provider backed by llama.cpp."""
+    return local_llama_answer(
+        system_text,
+        user_text,
+        timeout=timeout,
+        max_tokens=max_tokens,
+    )
