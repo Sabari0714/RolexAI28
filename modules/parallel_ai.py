@@ -15,17 +15,26 @@ from modules.providers import (
     openai_answer,
     gemini_answer,
     ollama_answer,
+    local_llama_answer_provider,
 )
 
 
-SUPPORTED = ("openai", "gemini", "ollama")
+SUPPORTED = ("local-llama", "openai", "gemini", "ollama")
 
 
 def _safe_call(provider, config, prompt):
     started = time.time()
 
     try:
-        if provider == "openai":
+        if provider == "local-llama":
+            text = local_llama_answer_provider(
+                config.get("system_prompt", ""),
+                prompt,
+                timeout=config.get("local_llama_timeout", 180),
+                max_tokens=config.get("local_llama_max_tokens", 256),
+            )
+
+        elif provider == "openai":
             text = openai_answer(
                 config.get("openai_key", ""),
                 config.get("openai_model", ""),
@@ -354,11 +363,11 @@ def synthesize_answers(user_prompt, result, config):
     # Pick a synthesis provider based on the task.
     # This is routing, not a hard-coded answer source.
     preferred_order = {
-        "coding": ["openai", "gemini", "ollama"],
-        "reasoning": ["openai", "gemini", "ollama"],
-        "current": ["gemini", "openai", "ollama"],
-        "general": ["gemini", "ollama", "openai"],
-        "math": ["openai", "gemini", "ollama"],
+        "coding": ["local-llama", "openai", "gemini", "ollama"],
+        "reasoning": ["local-llama", "openai", "gemini", "ollama"],
+        "current": ["local-llama", "gemini", "openai", "ollama"],
+        "general": ["local-llama", "gemini", "ollama", "openai"],
+        "math": ["local-llama", "openai", "gemini", "ollama"],
     }.get(
         question_type,
         ["gemini", "ollama", "openai"],
